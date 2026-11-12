@@ -1136,7 +1136,13 @@ export default function Inventory() {
         </section>
 
         <footer className="credit">
-          صُنع بواسطة <bdi dir="ltr">Mohammed Thamer</bdi>
+          <span className="credit-brand">
+            <span className="credit-mark" aria-hidden="true">MT</span>
+            <span>
+              تصميم وتطوير <bdi dir="ltr">Mohammed Thamer</bdi>
+            </span>
+          </span>
+          <span className="credit-meta">نظام إدارة مخزون الاستيكرات · الإصدار 1.0</span>
         </footer>
       </main>
 
