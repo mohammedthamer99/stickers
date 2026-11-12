@@ -18,9 +18,11 @@ type Modal =
   | null
   | { kind: "receive" }
   | { kind: "edit"; batch: Batch }
+  | { kind: "unlockEdit"; batch: Batch }
   | { kind: "withdraw"; fixedId?: number }
   | { kind: "log"; batch: Batch }
-  | { kind: "delete"; batch: Batch };
+  | { kind: "delete"; batch: Batch }
+  | { kind: "export" };
 
 type Filter = "all" | "soon" | "expired" | "empty";
 
@@ -531,6 +533,338 @@ function DeleteModal({
   );
 }
 
+/* ---------- edit unlock ---------- */
+
+function UnlockEditModal({ onClose, onUnlocked }: { onClose: () => void; onUnlocked: () => void }) {
+  const [code, setCode] = useState("");
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    setMsg("");
+    if (!code.trim()) return setMsg("اكتب رمز التعديل.");
+    setBusy(true);
+    try {
+      const res = await fetch("/api/edit-unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+        cache: "no-store",
+      });
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || "الرمز غلط.");
+      onUnlocked();
+    } catch (err) {
+      setMsg((err as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Shell onClose={onClose} label="رمز التعديل">
+      <form className="unlock" onSubmit={submit} noValidate>
+        <div className="unlock-head">
+          <span className="unlock-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <rect x="4.5" y="10" width="15" height="10" rx="2.5" />
+              <path d="M8 10V7.5a4 4 0 0 1 8 0V10" strokeLinecap="round" />
+              <circle cx="12" cy="15" r="1.4" fill="currentColor" stroke="none" />
+            </svg>
+          </span>
+          <div>
+            <h2>رمز التعديل</h2>
+            <p className="unlock-sub">تعديل الدفعات محمي، أدخل الرمز للمتابعة.</p>
+          </div>
+        </div>
+
+        <div className="field">
+          <label htmlFor="e-code">رمز التعديل</label>
+          <div className={"unlock-input" + (msg ? " bad" : "")}>
+            <svg
+              className="unlock-input-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              aria-hidden="true"
+            >
+              <rect x="4.5" y="10" width="15" height="10" rx="2.5" />
+              <path d="M8 10V7.5a4 4 0 0 1 8 0V10" strokeLinecap="round" />
+            </svg>
+            <input
+              id="e-code"
+              type={show ? "text" : "password"}
+              autoComplete="off"
+              maxLength={120}
+              autoFocus
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="••••••"
+            />
+            <button
+              className="unlock-eye"
+              type="button"
+              onClick={() => setShow((v) => !v)}
+              aria-label={show ? "إخفاء الرمز" : "إظهار الرمز"}
+              title={show ? "إخفاء الرمز" : "إظهار الرمز"}
+            >
+              {show ? (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M3 3l18 18" strokeLinecap="round" />
+                  <path d="M10.6 6.2A9.8 9.8 0 0 1 12 6c5 0 9 4.5 9 6 0 .6-.7 1.9-2 3.1M6.5 7.7C4.6 9.1 3 11 3 12c0 1.5 4 6 9 6 1.3 0 2.5-.3 3.6-.8" strokeLinecap="round" />
+                  <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" strokeLinecap="round" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              )}
+            </button>
+          </div>
+        </div>
+
+        <p className="msg unlock-msg" role="alert">
+          {msg}
+        </p>
+
+        <div className="unlock-actions">
+          <button className="btn primary" type="submit" disabled={busy}>
+            {busy ? "جاري التحقق…" : "فتح التعديل"}
+          </button>
+          <button className="btn" type="button" onClick={onClose}>
+            إلغاء
+          </button>
+        </div>
+        <p className="unlock-note">الرمز يبقى صالح 15 دقيقة بعد التحقق.</p>
+      </form>
+    </Shell>
+  );
+}
+
+/* ---------- export ---------- */
+
+function ExportModal({ items, onClose }: { items: Batch[]; onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Set<number>>(() => new Set(items.map((b) => b.id)));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const list = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return items
+      .filter((b) => {
+        if (q && !`${b.name} ${b.batch} ${b.location}`.toLowerCase().includes(q)) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const ea = rem(a) === 0 ? 1 : 0;
+        const eb = rem(b) === 0 ? 1 : 0;
+        if (ea !== eb) return ea - eb;
+        if (a.expiry !== b.expiry) return a.expiry < b.expiry ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+  }, [items, query]);
+
+  const allFilteredSelected = list.length > 0 && list.every((b) => selected.has(b.id));
+
+  function toggle(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleFiltered() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allFilteredSelected) list.forEach((b) => next.delete(b.id));
+      else list.forEach((b) => next.add(b.id));
+      return next;
+    });
+  }
+
+  function selectAll() {
+    setSelected(new Set(items.map((b) => b.id)));
+    setQuery("");
+  }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    setMsg("");
+    if (selected.size === 0) return setMsg("اختار مادة وحدة على الأقل.");
+    setBusy(true);
+    try {
+      const ids = Array.from(selected).join(",");
+      const res = await fetch(`/api/export?ids=${ids}`, { cache: "no-store" });
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || "تعذر إنشاء الملف، جرّب مرة ثانية.");
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get("Content-Disposition") || "";
+      const m = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+      const filename = m ? decodeURIComponent(m[1]) : "inventory.xlsx";
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(href);
+      onClose();
+    } catch (err) {
+      setMsg((err as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Shell wide onClose={onClose} label="تصدير كشف Excel">
+      <form onSubmit={submit} noValidate>
+        <h2>تصدير كشف Excel</h2>
+        <p className="meta">
+          اختار مادة وحدة أو أكثر. استخدم البحث بالاسم أو الباج نمبر، أو اختار كل المواد.
+        </p>
+
+        <div className="xsearch">
+          <input
+            type="search"
+            placeholder="دوّر باسم المادة أو الباج نمبر أو المكان"
+            aria-label="بحث عن مادة"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoFocus
+          />
+        </div>
+
+        <div className="xbar">
+          <label className="xall">
+            <input
+              type="checkbox"
+              checked={allFilteredSelected}
+              onChange={toggleFiltered}
+              disabled={list.length === 0}
+            />
+            <span>{query ? `تحديد النتائج (${list.length})` : "تحديد الكل"}</span>
+          </label>
+          <div className="xbar-actions">
+            <button className="btn sm" type="button" onClick={selectAll}>
+              كل المواد
+            </button>
+            <button
+              className="btn sm"
+              type="button"
+              onClick={() => setSelected(new Set())}
+              disabled={selected.size === 0}
+            >
+              مسح التحديد
+            </button>
+          </div>
+        </div>
+
+        <div className="xlist">
+          {items.length === 0 ? (
+            <p className="xempty">ماكو دفعات مسجلة للحين.</p>
+          ) : list.length === 0 ? (
+            <p className="xempty">ماكو نتائج لهذا البحث.</p>
+          ) : (
+            list.map((b) => {
+              const checked = selected.has(b.id);
+              return (
+                <label key={b.id} className={"xrow" + (checked ? " on" : "")}>
+                  <input type="checkbox" checked={checked} onChange={() => toggle(b.id)} />
+                  <span className="xmain">
+                    <span className="xname">{b.name}</span>
+                    <span className="xmeta">
+                      <bdi className="mono">{b.batch}</bdi>
+                      <span className="xdot" />
+                      ينتهي <bdi className="num">{b.expiry}</bdi>
+                      <span className="xdot" />
+                      متبقي <b className="num">{rem(b)}</b>
+                    </span>
+                  </span>
+                </label>
+              );
+            })
+          )}
+        </div>
+
+        <p className="msg" role="alert">
+          {msg}
+        </p>
+        <div className="sheet-actions">
+          <button className="btn primary" type="submit" disabled={busy || selected.size === 0}>
+            {busy ? "جاري التجهيز…" : `تنزيل الملف (${selected.size})`}
+          </button>
+          <button className="btn" type="button" onClick={onClose}>
+            إلغاء
+          </button>
+          <span className="xcount">المحدد: {selected.size} من {items.length}</span>
+        </div>
+      </form>
+    </Shell>
+  );
+}
+
+/* ---------- offline cache ---------- */
+
+const CACHE_KEY = "stk.inventory.cache.v1";
+
+type Cached = { items: Batch[]; at: number };
+
+function isBatch(v: unknown): v is Batch {
+  if (!v || typeof v !== "object") return false;
+  const b = v as Record<string, unknown>;
+  return (
+    typeof b.id === "number" &&
+    typeof b.name === "string" &&
+    typeof b.batch === "string" &&
+    typeof b.expiry === "string" &&
+    typeof b.location === "string" &&
+    typeof b.received === "number" &&
+    typeof b.dispensed === "number"
+  );
+}
+
+function readCache(): Cached | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw) as { items?: unknown; at?: unknown };
+    if (!d || !Array.isArray(d.items)) return null;
+    return {
+      items: d.items.filter(isBatch),
+      at: typeof d.at === "number" ? d.at : Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveCache(items: Batch[]): number {
+  const at = Date.now();
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ items, at }));
+  } catch {}
+  return at;
+}
+
 /* ---------- page ---------- */
 
 export default function Inventory() {
@@ -541,36 +875,67 @@ export default function Inventory() {
   const [query, setQuery] = useState("");
   const [modal, setModal] = useState<Modal>(null);
   const [toast, setToast] = useState("");
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  const [fromCache, setFromCache] = useState(false);
+  const [offline, setOffline] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const load = useCallback(async () => {
     try {
       const d = await api<{ items: Batch[] }>("/api/batches");
+      const at = saveCache(d.items);
       setItems(d.items);
+      setLastUpdated(at);
+      setFromCache(false);
       setLoadErr("");
     } catch (e) {
       setLoadErr((e as Error).message);
+      const cached = readCache();
+      if (cached) {
+        setItems((prev) => (prev.length ? prev : cached.items));
+        setLastUpdated((prev) => prev ?? cached.at);
+        setFromCache(true);
+      }
     } finally {
       setLoaded(true);
     }
   }, []);
-
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 30000);
-    const onFocus = () => load();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      clearInterval(t);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [load]);
 
   const showToast = useCallback((t: string) => {
     setToast(t);
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(""), 3200);
   }, []);
+
+  useEffect(() => {
+    const cached = readCache();
+    if (cached) {
+      setItems(cached.items);
+      setLastUpdated(cached.at);
+      setFromCache(true);
+      setLoaded(true);
+    }
+    setOffline(!navigator.onLine);
+
+    load();
+    const t = setInterval(load, 30000);
+    const onFocus = () => load();
+    const onOnline = () => {
+      setOffline(false);
+      showToast("رجع الاتصال، جاري تحديث البيانات…");
+      load();
+    };
+    const onOffline = () => setOffline(true);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, [load, showToast]);
 
   const closeModal = useCallback(() => setModal(null), []);
   const saved = useCallback(
@@ -635,6 +1000,17 @@ export default function Inventory() {
     ["empty", "خالصة"],
   ];
 
+  const stamp = lastUpdated ? fmtDT(new Date(lastUpdated).toISOString()) : "";
+  const storageText = !loaded
+    ? "جاري التحميل…"
+    : loadErr && fromCache
+      ? `غير متصل — آخر تحديث ${stamp}`
+      : loadErr
+        ? `تعذر التحديث: ${loadErr}`
+        : stamp
+          ? `آخر تحديث ${stamp}`
+          : "محفوظة بقاعدة البيانات";
+
   return (
     <>
       <main className="wrap">
@@ -642,9 +1018,7 @@ export default function Inventory() {
           <div>
             <h1>مخزن الاستيكرات</h1>
             <p>استلام وصرف وتتبع كل باج نمبر</p>
-            <span id="storage">
-              {loadErr ? `تعذر تحميل البيانات: ${loadErr}` : loaded ? "محفوظة بقاعدة البيانات" : "جاري التحميل…"}
-            </span>
+            <span id="storage">{storageText}</span>
           </div>
           <div className="topacts">
             <button className="btn primary" type="button" onClick={() => setModal({ kind: "receive" })}>
@@ -652,6 +1026,9 @@ export default function Inventory() {
             </button>
             <button className="btn" type="button" onClick={() => setModal({ kind: "withdraw" })}>
               سحب مادة
+            </button>
+            <button className="btn" type="button" onClick={() => setModal({ kind: "export" })}>
+              كشف Excel
             </button>
             <button className="btn ghost" type="button" onClick={logout}>
               خروج
@@ -703,6 +1080,14 @@ export default function Inventory() {
             </div>
           </div>
 
+          {loaded && (offline || loadErr) && (
+            <div className="offlinebar" role="status">
+              <strong>{offline ? "غير متصل بالإنترنت" : "تعذر الاتصال بالسيرفر"}</strong>
+              {stamp ? ` — تعرض آخر بيانات محفوظة (${stamp}).` : "."} راح تتحدث تلقائياً عند
+              رجوع الاتصال.
+            </div>
+          )}
+
           <div className="list" role="table" aria-label="الدفعات">
             {!loaded ? (
               <div className="empty">
@@ -741,7 +1126,7 @@ export default function Inventory() {
                     b={b}
                     onOut={() => setModal({ kind: "withdraw", fixedId: b.id })}
                     onLog={() => setModal({ kind: "log", batch: b })}
-                    onEdit={() => setModal({ kind: "edit", batch: b })}
+                    onEdit={() => setModal({ kind: "unlockEdit", batch: b })}
                     onDelete={() => setModal({ kind: "delete", batch: b })}
                   />
                 ))}
@@ -756,6 +1141,12 @@ export default function Inventory() {
       </main>
 
       {modal?.kind === "receive" && <ReceiveModal names={names} onClose={closeModal} onSaved={saved} />}
+      {modal?.kind === "unlockEdit" && (
+        <UnlockEditModal
+          onClose={closeModal}
+          onUnlocked={() => setModal({ kind: "edit", batch: modal.batch })}
+        />
+      )}
       {modal?.kind === "edit" && (
         <ReceiveModal edit={modal.batch} names={names} onClose={closeModal} onSaved={saved} />
       )}
@@ -764,6 +1155,7 @@ export default function Inventory() {
       )}
       {modal?.kind === "log" && <LogModal batch={modal.batch} onClose={closeModal} />}
       {modal?.kind === "delete" && <DeleteModal batch={modal.batch} onClose={closeModal} onSaved={saved} />}
+      {modal?.kind === "export" && <ExportModal items={items} onClose={closeModal} />}
 
       {toast && (
         <div className="toast" role="status" aria-live="polite">
