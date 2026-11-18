@@ -8,7 +8,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  if (await verifyToken(req.cookies.get(COOKIE)?.value)) {
+  if ((await verifyToken(req.cookies.get(COOKIE)?.value)) !== null) {
     return NextResponse.next();
   }
 

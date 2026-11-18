@@ -8,6 +8,7 @@ types.setTypeParser(20, (v: string) => parseInt(v, 10));
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS batches (
   id         BIGSERIAL PRIMARY KEY,
+  warehouse  SMALLINT    NOT NULL DEFAULT 1,
   name       TEXT        NOT NULL,
   batch_no   TEXT        NOT NULL,
   expiry     DATE        NOT NULL,
@@ -17,8 +18,10 @@ CREATE TABLE IF NOT EXISTS batches (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK (dispensed <= received)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS batches_name_batch_uq
-  ON batches (lower(name), lower(batch_no));
+ALTER TABLE batches ADD COLUMN IF NOT EXISTS warehouse SMALLINT NOT NULL DEFAULT 1;
+DROP INDEX IF EXISTS batches_name_batch_uq;
+CREATE UNIQUE INDEX IF NOT EXISTS batches_wh_name_batch_uq
+  ON batches (warehouse, lower(name), lower(batch_no));
 CREATE TABLE IF NOT EXISTS movements (
   id         BIGSERIAL PRIMARY KEY,
   batch_id   BIGINT      NOT NULL REFERENCES batches(id) ON DELETE CASCADE,

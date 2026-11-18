@@ -14,6 +14,8 @@ type Batch = {
 
 type Move = { id: number; kind: "in" | "out" | "adj"; qty: number | null; note: string; at: string };
 
+type Warehouse = { id: number; name: string };
+
 type Modal =
   | null
   | { kind: "receive" }
@@ -824,7 +826,7 @@ function ExportModal({ items, onClose }: { items: Batch[]; onClose: () => void }
 
 /* ---------- offline cache ---------- */
 
-const CACHE_KEY = "stk.inventory.cache.v1";
+const cacheKey = (warehouseId: number) => `stk.inventory.cache.v2.${warehouseId}`;
 
 type Cached = { items: Batch[]; at: number };
 
@@ -842,9 +844,9 @@ function isBatch(v: unknown): v is Batch {
   );
 }
 
-function readCache(): Cached | null {
+function readCache(warehouseId: number): Cached | null {
   try {
-    const raw = localStorage.getItem(CACHE_KEY);
+    const raw = localStorage.getItem(cacheKey(warehouseId));
     if (!raw) return null;
     const d = JSON.parse(raw) as { items?: unknown; at?: unknown };
     if (!d || !Array.isArray(d.items)) return null;
@@ -857,17 +859,55 @@ function readCache(): Cached | null {
   }
 }
 
-function saveCache(items: Batch[]): number {
+function saveCache(warehouseId: number, items: Batch[]): number {
   const at = Date.now();
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ items, at }));
+    localStorage.setItem(cacheKey(warehouseId), JSON.stringify({ items, at }));
   } catch {}
   return at;
 }
 
+/* ---------- warehouse session ---------- */
+
+function readWarehouseCookie(): Warehouse | null {
+  try {
+    const part = document.cookie.split("; ").find((c) => c.startsWith("stk_wh="));
+    if (!part) return null;
+    const parsed = JSON.parse(decodeURIComponent(part.slice("stk_wh=".length))) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const { id, name } = parsed as { id?: unknown; name?: unknown };
+    if (!Number.isInteger(id) || typeof name !== "string" || !name) return null;
+    return { id: id as number, name };
+  } catch {
+    return null;
+  }
+}
+
 /* ---------- page ---------- */
 
-export default function Inventory() {
+export default function InventoryApp() {
+  const [warehouse, setWarehouse] = useState<Warehouse | null>(null);
+
+  useEffect(() => {
+    const w = readWarehouseCookie();
+    if (w) setWarehouse(w);
+    else window.location.href = "/login";
+  }, []);
+
+  if (!warehouse) {
+    return (
+      <main className="wrap">
+        <div className="empty">
+          <strong>جاري التحميل…</strong>
+        </div>
+      </main>
+    );
+  }
+
+  return <Inventory warehouse={warehouse} />;
+}
+
+function Inventory({ warehouse }: { warehouse: Warehouse }) {
   const [items, setItems] = useState<Batch[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [loadErr, setLoadErr] = useState("");
@@ -883,14 +923,14 @@ export default function Inventory() {
   const load = useCallback(async () => {
     try {
       const d = await api<{ items: Batch[] }>("/api/batches");
-      const at = saveCache(d.items);
+      const at = saveCache(warehouse.id, d.items);
       setItems(d.items);
       setLastUpdated(at);
       setFromCache(false);
       setLoadErr("");
     } catch (e) {
       setLoadErr((e as Error).message);
-      const cached = readCache();
+      const cached = readCache(warehouse.id);
       if (cached) {
         setItems((prev) => (prev.length ? prev : cached.items));
         setLastUpdated((prev) => prev ?? cached.at);
@@ -899,7 +939,7 @@ export default function Inventory() {
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [warehouse.id]);
 
   const showToast = useCallback((t: string) => {
     setToast(t);
@@ -908,7 +948,7 @@ export default function Inventory() {
   }, []);
 
   useEffect(() => {
-    const cached = readCache();
+    const cached = readCache(warehouse.id);
     if (cached) {
       setItems(cached.items);
       setLastUpdated(cached.at);
@@ -1016,7 +1056,7 @@ export default function Inventory() {
       <main className="wrap">
         <header className="top">
           <div>
-            <h1>مخزن الاستيكرات</h1>
+            <h1>مخزن {warehouse.name}</h1>
             <p>استلام وصرف وتتبع كل باج نمبر</p>
             <span id="storage">{storageText}</span>
           </div>

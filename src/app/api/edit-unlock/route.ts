@@ -5,7 +5,9 @@ import {
   checkEditCode,
   editConfigured,
   makeEditToken,
+  type WarehousePublic,
 } from "@/lib/auth";
+import { requireWarehouse } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +17,13 @@ export async function POST(req: Request) {
       { error: "رمز التعديل مو مضبوط بإعدادات السيرفر. ضيف EDIT_CODE أو APP_PASSWORD." },
       { status: 500 },
     );
+  }
+
+  let warehouse: WarehousePublic;
+  try {
+    warehouse = await requireWarehouse();
+  } catch {
+    return NextResponse.json({ error: "لازم تسجل دخول." }, { status: 401 });
   }
 
   let code = "";
@@ -29,7 +38,7 @@ export async function POST(req: Request) {
   }
 
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(EDIT_COOKIE, await makeEditToken(), {
+  res.cookies.set(EDIT_COOKIE, await makeEditToken(warehouse.id), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",

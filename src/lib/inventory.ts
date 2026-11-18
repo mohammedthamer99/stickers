@@ -44,18 +44,25 @@ async function tx<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
   }
 }
 
-export async function listBatches(): Promise<Batch[]> {
+export async function listBatches(warehouse: number): Promise<Batch[]> {
   await ensureSchema();
-  const r = await pool().query<Batch>(`SELECT ${COLS} FROM batches ORDER BY expiry, name`);
+  const r = await pool().query<Batch>(
+    `SELECT ${COLS} FROM batches WHERE warehouse = $1 ORDER BY expiry, name`,
+    [warehouse],
+  );
   return r.rows;
 }
 
-export async function receive(inp: BatchInput): Promise<{ batch: Batch; merged: boolean }> {
+export async function receive(
+  warehouse: number,
+  inp: BatchInput,
+): Promise<{ batch: Batch; merged: boolean }> {
   return tx(async (c) => {
     const ex = await c.query<Batch>(
       `SELECT ${COLS} FROM batches
-       WHERE lower(name) = lower($1) AND lower(batch_no) = lower($2) FOR UPDATE`,
-      [inp.name, inp.batch],
+       WHERE warehouse = $1 AND lower(name) = lower($2) AND lower(batch_no) = lower($3)
+       FOR UPDATE`,
+      [warehouse, inp.name, inp.batch],
     );
     const cur = ex.rows[0];
 
@@ -88,9 +95,9 @@ export async function receive(inp: BatchInput): Promise<{ batch: Batch; merged: 
     }
 
     const ins = await c.query<Batch>(
-      `INSERT INTO batches (name, batch_no, expiry, location, received, dispensed)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${COLS}`,
-      [inp.name, inp.batch, inp.expiry, inp.location, inp.received, inp.dispensed],
+      `INSERT INTO batches (warehouse, name, batch_no, expiry, location, received, dispensed)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${COLS}`,
+      [warehouse, inp.name, inp.batch, inp.expiry, inp.location, inp.received, inp.dispensed],
     );
     const row = ins.rows[0];
     await c.query(`INSERT INTO movements (batch_id, kind, qty) VALUES ($1, 'in', $2)`, [
@@ -107,16 +114,23 @@ export async function receive(inp: BatchInput): Promise<{ batch: Batch; merged: 
   });
 }
 
-export async function updateBatch(id: number, inp: BatchInput): Promise<Batch> {
+export async function updateBatch(
+  warehouse: number,
+  id: number,
+  inp: BatchInput,
+): Promise<Batch> {
   return tx(async (c) => {
-    const ex = await c.query<Batch>(`SELECT ${COLS} FROM batches WHERE id = $1 FOR UPDATE`, [id]);
+    const ex = await c.query<Batch>(
+      `SELECT ${COLS} FROM batches WHERE id = $1 AND warehouse = $2 FOR UPDATE`,
+      [id, warehouse],
+    );
     const cur = ex.rows[0];
     if (!cur) throw new ApiError(404, "هذي الدفعة مو موجودة (يمكن انحذفت).");
 
     const dup = await c.query(
       `SELECT 1 FROM batches
-       WHERE lower(name) = lower($1) AND lower(batch_no) = lower($2) AND id <> $3`,
-      [inp.name, inp.batch, id],
+       WHERE warehouse = $1 AND lower(name) = lower($2) AND lower(batch_no) = lower($3) AND id <> $4`,
+      [warehouse, inp.name, inp.batch, id],
     );
     if (dup.rowCount) throw new ApiError(409, "عندك دفعة ثانية بنفس الاسم والباج نمبر.");
 
@@ -139,17 +153,22 @@ export async function updateBatch(id: number, inp: BatchInput): Promise<Batch> {
   });
 }
 
-export async function dispense(id: number, qty: number, note: string): Promise<Batch> {
+export async function dispense(
+  warehouse: number,
+  id: number,
+  qty: number,
+  note: string,
+): Promise<Batch> {
   return tx(async (c) => {
     const u = await c.query<Batch>(
-      `UPDATE batches SET dispensed = dispensed + $2
-       WHERE id = $1 AND received - dispensed >= $2 RETURNING ${COLS}`,
-      [id, qty],
+      `UPDATE batches SET dispensed = dispensed + $3
+       WHERE id = $1 AND warehouse = $2 AND received - dispensed >= $3 RETURNING ${COLS}`,
+      [id, warehouse, qty],
     );
     if (!u.rows[0]) {
       const e = await c.query<{ rem: number }>(
-        `SELECT received - dispensed AS rem FROM batches WHERE id = $1`,
-        [id],
+        `SELECT received - dispensed AS rem FROM batches WHERE id = $1 AND warehouse = $2`,
+        [id, warehouse],
       );
       if (!e.rows[0]) throw new ApiError(404, "هذي الدفعة مو موجودة (يمكن انحذفت).");
       throw new ApiError(409, `الكمية أكبر من المتبقي (${e.rows[0].rem}).`);
@@ -162,14 +181,22 @@ export async function dispense(id: number, qty: number, note: string): Promise<B
   });
 }
 
-export async function removeBatch(id: number): Promise<void> {
+export async function removeBatch(warehouse: number, id: number): Promise<void> {
   await ensureSchema();
-  const r = await pool().query(`DELETE FROM batches WHERE id = $1`, [id]);
+  const r = await pool().query(`DELETE FROM batches WHERE id = $1 AND warehouse = $2`, [
+    id,
+    warehouse,
+  ]);
   if (!r.rowCount) throw new ApiError(404, "هذي الدفعة مو موجودة.");
 }
 
-export async function batchLog(id: number): Promise<Movement[]> {
+export async function batchLog(warehouse: number, id: number): Promise<Movement[]> {
   await ensureSchema();
+  const own = await pool().query(`SELECT 1 FROM batches WHERE id = $1 AND warehouse = $2`, [
+    id,
+    warehouse,
+  ]);
+  if (!own.rowCount) throw new ApiError(404, "هذي الدفعة مو موجودة (يمكن انحذفت).");
   const r = await pool().query<Movement>(
     `SELECT id, kind, qty, note, created_at AS at
      FROM movements WHERE batch_id = $1 ORDER BY created_at DESC, id DESC`,

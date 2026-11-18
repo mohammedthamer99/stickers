@@ -3,7 +3,7 @@ import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "مخزن الاستيكرات",
+  title: "مخازن الاستيكرات",
   description: "استلام وتخزين وصرف استيكرات الأدوية",
   robots: { index: false, follow: false },
 };

@@ -72,7 +72,7 @@ export default function LoginPage() {
             <span className="brand-logo">
               <LogoMark className="brand-logo-mark" />
             </span>
-            <span className="brand-name">مخزن الاستيكرات</span>
+            <span className="brand-name">مخازن الاستيكرات</span>
           </div>
 
           <div className="brand-body">
@@ -110,18 +110,18 @@ export default function LoginPage() {
         <div className="auth-box">
           <div className="auth-mobile-brand">
             <LogoMark className="brand-logo-mark" />
-            <span>مخزن الاستيكرات</span>
+            <span>مخازن الاستيكرات</span>
           </div>
 
           <header className="auth-head">
             <span className="auth-eyebrow">مرحباً بعودتك</span>
             <h2 className="auth-title">تسجيل الدخول</h2>
-            <p className="auth-sub">اكتب كلمة السر للوصول إلى لوحة المخزن.</p>
+            <p className="auth-sub">اكتب رمز المخزن للدخول إلى لوحة التحكم.</p>
           </header>
 
           <form className="auth-form" onSubmit={submit}>
             <div className="auth-field">
-              <label htmlFor="pw">كلمة السر</label>
+              <label htmlFor="pw">رمز الدخول</label>
               <div className={`auth-input-group${msg ? " has-error" : ""}`}>
                 <svg className="auth-input-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                   <rect x="4" y="8.5" width="12" height="8" rx="2" stroke="currentColor" strokeWidth="1.5" />
@@ -134,7 +134,7 @@ export default function LoginPage() {
                   type={show ? "text" : "password"}
                   autoComplete="current-password"
                   autoFocus
-                  placeholder="••••••••"
+                  placeholder="رمز المخزن"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />

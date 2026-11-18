@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { listBatches } from "@/lib/inventory";
 import { ApiError } from "@/lib/http";
+import { requireWarehouse } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,7 @@ const HEAD = [
 
 export async function GET(req: Request) {
   try {
+    const warehouse = await requireWarehouse();
     const params = new URL(req.url).searchParams;
     const name = params.get("name")?.trim() ?? "";
     const idsRaw = params.get("ids")?.trim() ?? "";
@@ -51,7 +53,7 @@ export async function GET(req: Request) {
       ids = new Set(parts);
     }
 
-    let rows = await listBatches();
+    let rows = await listBatches(warehouse.id);
     if (ids) rows = rows.filter((b) => ids!.has(b.id));
     if (name) rows = rows.filter((b) => b.name.toLowerCase() === name.toLowerCase());
     if ((ids || name) && rows.length === 0) {
@@ -102,11 +104,11 @@ export async function GET(req: Request) {
 
     const wb = XLSX.utils.book_new();
     wb.Workbook = { Views: [{ RTL: true }] };
-    XLSX.utils.book_append_sheet(wb, ws, label.slice(0, 31));
+    XLSX.utils.book_append_sheet(wb, ws, `${warehouse.name} - ${label}`.slice(0, 31));
 
     const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
     const stamp = new Date().toISOString().slice(0, 10);
-    const file = `كشف-${label}-${stamp}.xlsx`;
+    const file = `كشف-${warehouse.name}-${label}-${stamp}.xlsx`;
 
     return new Response(new Uint8Array(buf), {
       headers: {
